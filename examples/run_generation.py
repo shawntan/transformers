@@ -103,6 +103,27 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')
     return logits
 
 
+def resample_sequence(model, length, context, num_samples=1, temperature=0.5,
+                      top_k=0, top_p=0.0, is_xlnet=False, device='cpu'):
+    generated = context
+    idxs = np.arange(generated.shape[1])
+    np.random.shuffle(idxs)
+    with torch.no_grad():
+        inputs = {'input_ids': generated}
+        update_pos = idxs[:10]
+        input_ids = generated
+        perm_mask = torch.zeros((1, input_ids.shape[1], input_ids.shape[1]),
+                                dtype=torch.float, device=device)
+        perm_mask[:, :, update_pos] = 1.0
+        inputs = {'input_ids': input_ids, 'perm_mask': perm_mask}
+        outputs = model(**inputs)
+        next_token_logits = outputs[0][0, update_pos, :] / temperature
+        # filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+        next_token = torch.multinomial(F.softmax(next_token_logits, dim=-1), num_samples=1)
+        generated[:, update_pos] = next_token[:, 0]
+    return generated, update_pos
+
+
 def sample_sequence(model, length, context, num_samples=1, temperature=1, top_k=0, top_p=0.0, is_xlnet=False, device='cpu'):
     context = torch.tensor(context, dtype=torch.long, device=device)
     context = context.unsqueeze(0).repeat(num_samples, 1)
@@ -111,7 +132,7 @@ def sample_sequence(model, length, context, num_samples=1, temperature=1, top_k=
         for _ in trange(length):
 
             inputs = {'input_ids': generated}
-            if is_xlnet: 
+            if is_xlnet:
                 # XLNet is a direct (predict same token, not next token) and bi-directional model by default
                 # => need one additional dummy token in the input (will be masked), attention mask and target mapping (see model docstring)
                 input_ids = torch.cat((generated, torch.zeros((1, 1), dtype=torch.long, device=device)), dim=1)
@@ -169,11 +190,11 @@ def main():
     print(args)
     while True:
         raw_text = args.prompt if args.prompt else input("Model prompt >>> ")
-        if args.model_type in ["transfo-xl", "xlnet"]:
+        #if args.model_type in ["transfo-xl", "xlnet"]:
             # Models with memory likes to have a long prompt for short inputs.
-            raw_text = (args.padding_text if args.padding_text else PADDING_TEXT) + raw_text
+       #     raw_text = (args.padding_text if args.padding_text else PADDING_TEXT) + raw_text
         context_tokens = tokenizer.encode(raw_text)
-        out = sample_sequence(
+        context_out = sample_sequence(
             model=model,
             context=context_tokens,
             length=args.length,
@@ -183,9 +204,31 @@ def main():
             device=args.device,
             is_xlnet=bool(args.model_type == "xlnet"),
         )
-        out = out[0, len(context_tokens):].tolist()
-        text = tokenizer.decode(out, clean_up_tokenization_spaces=True)
-        print(text)
+        out = context_out[0, len(context_tokens):].tolist()
+        raw_text = raw_text + " " + tokenizer.decode(out, clean_up_tokenization_spaces=True)
+        print(raw_text)
+        if args.model_type == "xlnet":
+            context_tokens = tokenizer.encode(raw_text)
+            context = torch.tensor(context_tokens, dtype=torch.long, device=args.device)
+            context = context.unsqueeze(0).repeat(1, 1)
+            for _ in range(20):
+                context_out, update_pos = resample_sequence(
+                    model=model,
+                    context=context,
+                    length=args.length,
+                    temperature=args.temperature,
+                    top_k=args.top_k,
+                    top_p=args.top_p,
+                    device=args.device,
+                    is_xlnet=bool(args.model_type == "xlnet"),
+                )
+                out = context_out[0, :].tolist()
+                tokens = tokenizer.convert_ids_to_tokens(out) #, clean_up_tokenization_spaces=True)
+                for i in update_pos:
+                    tokens[i] = "["+tokens[i]+"]"
+                text = tokenizer.convert_tokens_to_string(tokens)
+                print(text)
+
         if args.prompt:
             break
     return text
