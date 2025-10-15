@@ -29,6 +29,7 @@ from transformers.activations import ACT2FN
 
 from ...cache_utils import Cache
 from ...generation import GenerationMixin
+from ...integrations import use_kernel_forward_from_hub
 from ...modeling_attn_mask_utils import AttentionMaskConverter
 from ...modeling_layers import GradientCheckpointingLayer
 from ...modeling_outputs import BaseModelOutputWithPast, MoeCausalLMOutputWithPast, MoeModelOutputWithPast
@@ -934,6 +935,7 @@ class GraniteFlashAttentionKwargs(TypedDict, total=False):
     seq_idx: torch.IntTensor
 
 
+@use_kernel_forward_from_hub("RMSNorm")
 class GraniteMoeHybridRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
@@ -1047,6 +1049,7 @@ class GraniteMoeHybridTopKGating(nn.Module):
         return index_sorted_experts, batch_index, batch_gates, expert_size, logits
 
 
+@use_kernel_forward_from_hub("ScatterMoEGatedMLP")
 class GraniteMoeHybridMoE(nn.Module):
     """
     A Sparsely gated mixture of experts layer with 1-layer Feed-Forward networks as experts.

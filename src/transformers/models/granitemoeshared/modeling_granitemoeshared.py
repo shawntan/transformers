@@ -28,6 +28,7 @@ from torch import nn
 from ...activations import ACT2FN
 from ...cache_utils import Cache, DynamicCache
 from ...generation import GenerationMixin
+from ...integrations import use_kernel_forward_from_hub
 from ...modeling_attn_mask_utils import AttentionMaskConverter
 from ...modeling_layers import GradientCheckpointingLayer
 from ...modeling_outputs import BaseModelOutputWithPast, MoeCausalLMOutputWithPast, MoeModelOutputWithPast
@@ -99,6 +100,7 @@ class GraniteMoeSharedMLP(nn.Module):
         return hidden_states
 
 
+@use_kernel_forward_from_hub("RMSNorm")
 class GraniteMoeSharedRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
@@ -212,6 +214,7 @@ class GraniteMoeSharedTopKGating(nn.Module):
         return index_sorted_experts, batch_index, batch_gates, expert_size, logits
 
 
+@use_kernel_forward_from_hub("ScatterMoEGatedMLP")
 class GraniteMoeSharedMoE(nn.Module):
     """
     A Sparsely gated mixture of experts layer with 1-layer Feed-Forward networks as experts.
