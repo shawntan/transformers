@@ -115,6 +115,12 @@ class GraniteMoeHybridConfig(PreTrainedConfig):
         mamba_proj_bias (`bool`, *optional*, defaults to `False`):
             Flag indicating whether or not to use bias in the input and output projections (["in_proj", "out_proj"])
             of the mamba mixer block.
+        sliding_window_window_size (`int`, *optional*, defaults to `1024`):
+            Window size (in tokens) to use for sliding-window attention when a layer is configured as
+            `sliding_window_attention` in `layer_types`.
+            sliding_window_size (`int`, *optional*, defaults to `1024`):
+                Window size (in tokens) to use for sliding-window attention when a layer is configured as
+                `sliding_window_attention` in `layer_types`.
     ```python
     >>> from transformers import GraniteMoeHybridModel, GraniteMoeHybridConfig
 
@@ -172,6 +178,7 @@ class GraniteMoeHybridConfig(PreTrainedConfig):
         mamba_chunk_size: Optional[int] = 256,
         mamba_conv_bias: Optional[bool] = True,
         mamba_proj_bias: Optional[bool] = False,
+        sliding_window_size: Optional[int] = 1024,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -206,8 +213,10 @@ class GraniteMoeHybridConfig(PreTrainedConfig):
 
         mamba_intermediate = mamba_expand * hidden_size
 
-        if layer_types is not None and any(layer_type not in ["mamba", "attention"] for layer_type in layer_types):
-            raise ValueError("layer_types must be a list strings in  [`mamba` `attention`]")
+        if layer_types is not None and any(
+            layer_type not in ["mamba", "attention", "sliding_window_attention"] for layer_type in layer_types
+        ):
+            raise ValueError("layer_types must be a list strings in  [`mamba` `attention` `sliding_window_attention`]")
 
         if mamba_intermediate % mamba_n_heads != 0:
             raise ValueError("mamba_n_heads must divide mamba_expand * hidden_size")
@@ -229,6 +238,8 @@ class GraniteMoeHybridConfig(PreTrainedConfig):
         self.mamba_proj_bias = mamba_proj_bias
         self.mamba_expand = mamba_expand
         self.layer_types = layer_types
+        # sliding-window attention settings
+        self.sliding_window_size = sliding_window_size
 
         super().__init__(
             pad_token_id=pad_token_id,

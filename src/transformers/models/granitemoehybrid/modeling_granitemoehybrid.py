@@ -179,6 +179,14 @@ class GraniteMoeHybridAttention(nn.Module):
         if self.config._attn_implementation != "eager":
             attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
+        sliding_window = None
+        try:
+            layer_type = self.config.layers_block_type[self.layer_idx]
+        except Exception:
+            layer_type = None
+        if layer_type == "sliding_window_attention":
+            sliding_window = self.config.sliding_window_size
+
         attn_output, attn_weights = attention_interface(
             self,
             query_states,
@@ -187,6 +195,7 @@ class GraniteMoeHybridAttention(nn.Module):
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
+            sliding_window=sliding_window,
             **kwargs,
         )
 

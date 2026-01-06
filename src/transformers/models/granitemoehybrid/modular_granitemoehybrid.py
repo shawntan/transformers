@@ -52,6 +52,7 @@ class GraniteMoeHybridAttention(GraniteMoeSharedAttention):
     def __init__(self, config: GraniteMoeHybridConfig, layer_idx: int):
         super().__init__(config, layer_idx)
 
+
     def forward(  # FIME: @ARTHUR this forward is also classic: attention nope
         self,
         hidden_states: torch.Tensor,
@@ -80,6 +81,14 @@ class GraniteMoeHybridAttention(GraniteMoeSharedAttention):
         if self.config._attn_implementation != "eager":
             attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
+        sliding_window = None
+        try:
+            layer_type = self.config.layers_block_type[self.layer_idx]
+        except Exception:
+            layer_type = None
+        if layer_type == "sliding_window_attention":
+            sliding_window = self.config.sliding_window_size
+        
         attn_output, attn_weights = attention_interface(
             self,
             query_states,
@@ -88,12 +97,14 @@ class GraniteMoeHybridAttention(GraniteMoeSharedAttention):
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
+            sliding_window=sliding_window,
             **kwargs,
         )
 
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
+
 
 
 class GraniteMoeHybridMambaLayer(BambaMixer):
