@@ -19,6 +19,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 from collections.abc import Callable
 from typing import Any, Optional, TypedDict, Union
 
@@ -40,7 +41,7 @@ from ...integrations import (
 from ...masking_utils import create_causal_mask
 from ...modeling_layers import GradientCheckpointingLayer
 from ...modeling_outputs import BaseModelOutputWithPast, MoeCausalLMOutputWithPast, MoeModelOutputWithPast
-from ...modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
+from ...modeling_rope_utils import ROPE_INIT_FUNCTIONS, RopeParameters, dynamic_rope_update
 from ...modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from ...processing_utils import Unpack
 from ...utils import TransformersKwargs, auto_docstring, can_return_tuple, logging
@@ -1285,6 +1286,12 @@ class GraniteMoeHybridModel(GraniteMoeHybridPreTrainedModel):
         self.gradient_checkpointing = False
         self.embedding_multiplier = config.embedding_multiplier
 
+        swa_config = copy.deepcopy(config)
+        swa_config.rope_parameters = RopeParameters(rope_theta=10000, rope_type="default")
+        self.rotary_emb_swa = (
+            GraniteMoeHybridRotaryEmbedding(swa_config) if config.position_embedding_type == "rope" else None
+        )
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1329,11 +1336,16 @@ class GraniteMoeHybridModel(GraniteMoeHybridPreTrainedModel):
 
         # embed positions
         hidden_states = inputs_embeds
+
         position_embeddings = None
         if self.rotary_emb is not None:
             position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
-        for decoder_layer in self.layers:
+        position_embeddings_swa = None
+        if self.rotary_emb_swa is not None:
+            position_embeddings_swa = self.rotary_emb_swa(hidden_states, position_ids)
+
+        for i, decoder_layer in enumerate(self.layers):
             # Depending on the layer type we opt for 2D base attention mask (Mamba) or 4D causal mask (Attention)
             layer_mask = mamba_mask if decoder_layer.layer_type == "mamba" else causal_mask
 
@@ -1343,7 +1355,11 @@ class GraniteMoeHybridModel(GraniteMoeHybridPreTrainedModel):
                 past_key_values=past_key_values,
                 use_cache=use_cache,
                 cache_position=cache_position,
-                position_embeddings=position_embeddings,
+                position_embeddings=(
+                    position_embeddings_swa
+                    if self.config.layer_types[i] == "sliding_window_attention"
+                    else position_embeddings
+                ),
                 **kwargs,
             )
         hidden_states = self.norm(hidden_states)

@@ -18,7 +18,8 @@ from typing import Optional, Union
 
 import torch
 from torch import nn
-
+import copy
+from ...modeling_rope_utils import RopeParameters
 from ... import initialization as init
 from ...cache_utils import Cache
 from ...masking_utils import create_causal_mask
@@ -222,6 +223,10 @@ class GraniteMoeHybridModel(GraniteMoeSharedModel):
         self.embedding_multiplier = config.embedding_multiplier
         self.rotary_emb = GraniteMoeHybridRotaryEmbedding(config) if config.position_embedding_type == "rope" else None
 
+        swa_config = copy.deepcopy(config)
+        swa_config.rope_parameters = RopeParameters(rope_theta=10000, rope_type='default')
+        self.rotary_emb_swa = GraniteMoeHybridRotaryEmbedding(swa_config) if config.position_embedding_type == "rope" else None
+
     @auto_docstring
     @check_model_inputs
     def forward(
@@ -263,21 +268,27 @@ class GraniteMoeHybridModel(GraniteMoeSharedModel):
 
         # embed positions
         hidden_states = inputs_embeds
+
         position_embeddings = None
         if self.rotary_emb is not None:
             position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
-        for decoder_layer in self.layers:
+        position_embeddings_swa = None
+        if self.rotary_emb_swa is not None:
+            position_embeddings_swa = self.rotary_emb_swa(hidden_states, position_ids)
+
+        for i, decoder_layer in enumerate(self.layers):
             # Depending on the layer type we opt for 2D base attention mask (Mamba) or 4D causal mask (Attention)
             layer_mask = mamba_mask if decoder_layer.layer_type == "mamba" else causal_mask
-
+            
             hidden_states = decoder_layer(
                 hidden_states,
                 attention_mask=layer_mask,
                 past_key_values=past_key_values,
                 use_cache=use_cache,
                 cache_position=cache_position,
-                position_embeddings=position_embeddings,
+                position_embeddings=(
+                    position_embeddings_swa if self.config.layer_types[i] == "sliding_window_attention" else position_embeddings),
                 **kwargs,
             )
         hidden_states = self.norm(hidden_states)
